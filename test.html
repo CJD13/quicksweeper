@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+	<html>
+		<script>
+var ws2 = new WebSocket('ws://'+window.location.host+':8000');
+ws2.onmessage=function(m){
+	//Send the name that the user enters to the server. This happens as soon as the server prompts the client to enter a name.
+	name=prompt(m.data);
+	ws2.send(name);
+	//Take the user to a menu where they can join a game.
+	setupLobby();
+};
+function setupLobby(){
+	//Clear the document
+	document.body.innerHTML='';
+	//Add button to refresh the list of available games
+	let refresh=document.body.appendChild(document.createElement('button'));
+	refresh.innerText='refresh';
+	refresh.onclick=setupLobby;
+	document.body.appendChild(document.createElement('br'));
+	let create=document.body.appendChild(document.createElement('button'));
+	create.innerText='Create game';
+	create.onclick=function(){ws2.send('n'+prompt('Game name')+'\nfreeze'+'\n'+prompt('board size')+'\n.2');refresh.onclick()}
+	document.body.appendChild(document.createElement('br'));
+	//request a list of games from the server
+	ws2.send('g');
+	ws2.onmessage=function(m){
+		//Get a list of game names from the message string
+		games=m.data.split('\n');
+		for(let g of games){
+			//Create a button to join each game
+			document.body.appendChild(document.createElement('br'));
+			let btn=document.body.appendChild(document.createElement('button'));
+			btn.innerText=g;
+			//Make the game name a constant so it can appear in the following function
+			const n=g;
+			btn.onclick=function(){
+				//Send a join message to the server
+				ws2.send('j'+n);
+				ws2.onmessage=function(m){
+					m=m.data.split('\n');
+					if(m[0]=='acceleration'){
+						setupAcceleration(+m[1]);
+					}else{
+						//m is the initial message from the game. The second element of the message is the board size.
+						setupMinesweeper(+m[1]);
+					}
+				};
+			};
+		}
+	};
+}
+function setupAcceleration(boardsize){
+	document.body.innerHTML='';
+	var s = Math.min(window.innerHeight,window.innerWidth)-25;
+	ce=document.body.appendChild(document.createElement('canvas'));
+	ce.width=s;
+	ce.height=s;
+	c=ce.getContext('2d');
+	c.scale(s/boardsize,s/boardsize);
+	c.lineWidth=.05;
+	let btn=document.body.appendChild(document.createElement('button'));
+	btn.innerText='Leave game';
+	btn.onclick=function(){
+		//Send a leave message to the server
+		ws2.send('\x00');
+		//Return to game selection
+		document.body.onkeydown=null;
+		document.body.onkeyup=null;
+		setTimeout(setupLobby,100);
+	};
+	colors={};
+	ax=0;
+	ay=0;
+	lastSend='0\n0';
+	ws2.onmessage=function(e){
+		let m = e.data.split('\n');
+		let name = m[0];
+		let x = +m[1];
+		let y = +m[2];
+		if(colors[name]==undefined){
+			colors[name]='#'+(Math.floor(16777216+Math.random()*16777216).toString(16)).slice(1);
+		}
+		//c.clearRect(x-1.1,y-1.1,2.2,2.2);
+		c.globalAlpha=.01;
+		c.fillStyle='#ffffff';
+		c.fillRect(0,0,boardsize,boardsize);
+		c.globalAlpha=1;
+		c.fillStyle=colors[name];
+		c.beginPath();
+		c.arc(x,y,1,0,2*Math.PI);
+		c.fill();
+		//c.stroke();
+	};
+	document.body.addEventListener('keydown',function(e){
+		var d = e.code;
+		if(d=='ArrowLeft') ax=-1;
+		if(d=='ArrowRight') ax=1;
+		if(d=='ArrowUp') ay=-1;
+		if(d=='ArrowDown') ay=1;
+		if(ax+'\n'+ay!=lastSend){
+			ws2.send(ax+'\n'+ay);
+			lastSend=ax+'\n'+ay;
+		}
+	});
+	document.body.addEventListener('keyup',function(e){
+		var d = e.code;
+		if(d=='ArrowLeft') ax=0;
+		if(d=='ArrowRight') ax=0;
+		if(d=='ArrowUp') ay=0;
+		if(d=='ArrowDown') ay=0;
+		if(ax+'\n'+ay!=lastSend){
+			ws2.send(ax+'\n'+ay);
+			lastSend=ax+'\n'+ay;
+		}
+	});
+	
+}
+function setupMinesweeper(boardsize){
+	//s is the width of the canvas. By default this is twenty times the number of cells, so that each cell has width twenty.
+	var s = 20*boardsize;
+	//Set up the state of the board. This is necessary for keeping track of player scores and redrawing the canvas.
+	var board=[];
+	var flags={};
+	//Initialize a variable to keep track of double-clicks
+	var doubleClick='';
+	for(let i=0; i<boardsize; i++){
+		board.push([]);
+		for(let j=0; j<boardsize; j++){
+			board[i].push('');
+		}
+	}
+	//Clear the document.
+	document.body.innerHTML='';
+	//Hack to make sure the leaderboard does not make any cells inaccessable - this is a div containing a bunch of line breaks.
+	var brdiv=document.body.appendChild(document.createElement('div'));
+	//Create a canvas.
+	ce=document.body.appendChild(document.createElement('canvas'));
+	ce.width=s;
+	ce.height=s;
+	document.body.appendChild(document.createElement('br'));
+	//Create a button to leave the game.
+	let btn=document.body.appendChild(document.createElement('button'));
+	btn.innerText='Leave game';
+	btn.onclick=function(){
+		//Send a leave message to the server
+		ws2.send('\x00');
+		//Return to game selection
+		setupLobby();
+	};
+	//List of players and their scores
+	var ul=document.body.appendChild(document.createElement('ul'));
+	//Fix this in the top left
+	ul.style.position='fixed';
+	ul.style.top=0;
+	ul.style.left=0;
+	ul.style.font='20px sans-serif';
+	ul.style.backgroundColor='#808080';
+	lis={};
+	//Set up the player's list item
+	liMe=ul.appendChild(document.createElement('li'));
+	liMe.style.color='#ffffff';
+	liMe.appendChild(document.createElement('a')).innerText=name;
+	liMe.appendChild(document.createElement('a')).innerText=0;
+	liMe.childNodes[1].style.marginLeft='10px';
+	brdiv.appendChild(document.createElement('br'));
+	brdiv.appendChild(document.createElement('br'));
+	var colors ={};
+	colors['0']='#808080';
+	colors['None']='#000000';
+	scores={};
+	var score=0;
+	var numPlayers=0;
+	var started=false;
+	var named=false;
+	var marked={};
+	c=ce.getContext('2d');
+	c.font=''+s/boardsize+'px sans-serif';
+	c.fillStyle='#808080';
+	//Draw the cells
+	c.fillRect(0,0,s,s);
+	c.fillStyle='#000000';
+	for(let i = 0; i<=boardsize;i++){
+		c.fillRect(i*s/boardsize,0,1,s);
+		c.fillRect(0,i*s/boardsize,s,1);
+	}
+	//handle server messages
+	ws2.onmessage=function(e){
+		var l=e.data.split('\n');
+		//extract x and y
+		var x = +l[0];
+		var y = +l[1];
+		//extract the message code and data
+		var code=l[2][0];
+		var data=l[2].slice(1);
+		//New player has joined:
+		if(code=='j'){
+			//assign that player a random color
+			colors[data]='#'+(Math.floor(16777216+Math.random()*16777216).toString(16)).slice(1);
+			//initialize score
+			scores[data]=0;
+			//add that player to the leaderboard
+			lis[data]=ul.appendChild(document.createElement('li'));
+			//Add their name
+			lis[data].appendChild(document.createElement('a')).innerText=data;
+			//add score
+			lis[data].appendChild(document.createElement('a')).innerText=scores[data];
+			//Separate the score from the name
+			lis[data].childNodes[1].style.marginLeft='10px';
+			//Color their name and score with their color
+			lis[data].style.color=colors[data];
+			brdiv.appendChild(document.createElement('br'));
+			brdiv.appendChild(document.createElement('br'));
+			//Tell the user that the player has joined
+			alert(data+' has joined the game.');
+		}
+		//Square is revealed:
+		if(code=='c'){
+			//If this square was not already revealed:
+			//console.log(board[x][y]);
+			if(board[x][y]==''){
+				//Increase your score
+				score+=1
+				//Update leaderboard
+				liMe.childNodes[1].innerText=score;
+			}
+			board[x][y]=name;
+			//Write the number in the square
+			c.fillStyle='#ffffff';
+			c.fillRect(x*s/boardsize,y*s/boardsize,s/boardsize,s/boardsize);
+			c.fillStyle='#000000';
+			c.fillText(data,x*s/boardsize,(y+1)*s/boardsize,s/boardsize);
+			//If there is a zero, then start recursive clearing
+			if(data=='0') {
+				//iterate through surrounding squares
+				for(var a=x-1;a<=x+1;a++){
+					for(var b=y-1;b<=y+1;b++){
+						//If the square is within the boundary of the board
+						if(a>=0&&b>=0&&a<boardsize&&b<boardsize){
+							let st=''+a+'\n'+b;
+							//If this square has not already been guessed
+							if(!marked[st]){
+								//record that the square has been guessed and send to the server
+								marked[st]=true;
+								ws2.send(st);
+							}
+						}
+					}
+				}
+			}
+		}
+		//Another player revealed a square:
+		if(code=='o'){
+			marked[''+x+'\n'+y]=false;
+			c.fillStyle=colors[data];
+			c.fillRect(x*s/boardsize,y*s/boardsize,s/boardsize,s/boardsize);
+			if(board[x][y]==''){
+				scores[data]+=1;
+				lis[data].childNodes[1].innerText=scores[data];
+			}
+			board[x][y]=data;
+		}
+		//Someone is frozen:
+		if(code=='f'){
+			//Mark the square where the mine was
+			flags[''+x+'\n'+y]=true;
+			c.fillStyle='#000000';
+			c.fillText('X',x*s/boardsize,(y+1)/boardsize*s,s/boardsize);
+			//am I frozen?
+			if(data==name){
+				//Let the user know, and alert them when they can resume play
+				setTimeout(function(){alert('You are unfrozen.')},14500);
+				alert('You selected a mine.');
+			} else {
+				//someone else is frozen
+				//Create a constant with their leaderboard style so it can be accessed in the timeout function
+				const k=lis[data].style;
+				//Update the player's background color on the leaderboard to show they are frozen
+				k.backgroundColor='#444444';
+				//Reset after fifteen seconds
+				setTimeout(function(){k.backgroundColor='';},15000);
+			}
+		}
+		//message to the player
+		if(code=='m'){
+			alert(data);
+		}
+		if(code=='s'){
+			//Remove or reset
+			if(data=='N'){
+				//remove
+				c.fillStyle='#000000';
+				c.fillRect(x*s/boardsize,y*s/boardsize,s/boardsize,s/boardsize);
+				board[x][y]==undefined;
+			} else {
+				//reset
+				c.fillStyle='#808080'
+				c.fillRect(x*s/boardsize,y*s/boardsize,s/boardsize,s/boardsize);
+				marked[''+x+'\n'+y]=false;
+				flags[''+x+'\n'+y]=false;
+				if(data=='o'){
+					//another player's square was removed
+					scores[board[x][y]]-=1;
+					lis[board[x][y]].childNodes[1].innerText=scores[board[x][y]];
+				}
+				if(data=='y'){
+					score-=1;
+					liMe.childNodes[1].innerText=score;
+				}
+				board[x][y]='';
+			}
+		}
+	};
+	var updateFlag = function(x,y){
+		cstr=''+x+'\n'+y;
+		//If it is not already flagged:
+		if(!flags[cstr]){
+			flags[cstr]=true;
+			//mark that square with an x
+			c.fillStyle='#000000';
+			c.fillText('X',x*s/boardsize,(y+1)/boardsize*s,s/boardsize);
+			return false;
+		} else {
+			flags[cstr]=false;
+			//remove the x
+			c.fillStyle='#808080';
+			c.fillRect(x*s/boardsize,y*s/boardsize,s/boardsize,s/boardsize);
+			return false;
+		}
+	};
+	var clickTime;
+	var clickTime2;
+	var hold;
+	//Handle user input
+	ce.onpointerdown=function(e){
+		//console.log(e);
+		//Get x and y positions relative to the board
+		let x = Math.floor((e.x-ce.getBoundingClientRect().left)*boardsize/s);
+		let y = Math.floor((e.y-ce.getBoundingClientRect().top)*boardsize/s);
+		e.preventDefault();
+		//left click
+		if(e.which==1){
+			//click square that is already owned
+			if(board[x][y]==name){
+				//guess adjacent squares that are not flagged
+				for(var a=x-1;a<=x+1;a++){
+					for(var b=y-1;b<=y+1;b++){
+						let st=''+a+'\n'+b;
+						console.log(st);
+						//If the square is within the boundary of the board and not flagged
+						if(a>=0&&b>=0&&a<boardsize&&b<boardsize&&!flags[st]){
+							marked[st]=true;
+							ws2.send(st);
+						}
+					}
+				}
+			}
+			//click uncliamed square
+			if(board[x][y]==''){
+				//flag with press and hold
+				const i = x;
+				const j = y;
+				hold=false;
+				clickTime=setTimeout(function(){updateFlag(i,j);hold=true;},400);
+				clickTime2=setTimeout(function(){hold=true;},200);
+			}
+		//right click
+		} else if(e.which==3){
+			e.preventDefault();
+			updateFlag(x,y);
+			return false;
+			
+		}
+	};
+	//finish checking long clicks
+	ce.onpointerup=function(e){
+		//alert();
+		//console.log(e);
+		if(e.which==3){
+			return;
+		}
+		//Get x and y positions relative to the board
+		let x = Math.floor((e.x-ce.getBoundingClientRect().left)*boardsize/s);
+		let y = Math.floor((e.y-ce.getBoundingClientRect().top)*boardsize/s);
+		cstr=''+x+'\n'+y;
+		e.preventDefault();
+		clearTimeout(clickTime);
+		clearTimeout(clickTime2);
+		console.log(hold);
+		if(!hold){
+			//Record that the square is guessed, and send guess to the server
+			marked[cstr]=true;
+			ws2.send(cstr);
+		}
+	};
+	//Prevent the menu from appearing while flagging mines
+	ce.oncontextmenu=function(e){
+		e.preventDefault();
+		return false;
+	};
+}
+</script>
+</html>
