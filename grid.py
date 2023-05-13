@@ -8,7 +8,7 @@ class grid:
     def of(array2):
         #self.data=array2
         def get(x, y):
-            if 0<=x and x<len(array2) and 0<=y and y<=len(array2[x]):
+            if 0<=x and x<len(array2) and 0<=y and y<len(array2[x]):
                 return array2[x][y]
             return None
         def s(x,y,v):
@@ -21,15 +21,13 @@ class grid:
         return self[x][y]!=None
     #returns this grid represented with a new coordinate system, centered at (x,y)
     def recentered(self,x,y):
-        return grid(get=lambda a, b: self[a-x][b-y])
+        return grid(get=lambda a, b: self[a+x][b+y])
     #returns this grid translated by (dx,dy)
     def translated(self, dx, dy):
         return self.recentered(-dx,-dy)
     #returns this grid rotated counterclockwise by an angle of n pi/2
     def rotated(self,n):
-        rotX=vector([[1,0],[0,1],[-1,0],[0,-1]][n%4])
-        rotY=vector([[0,1],[-1,0],[0,-1],[1,0]][n%4])
-        return grid(get=lambda x, y: self[vector([x,y]).dot(rotX)][vector([x,y]).dot(rotY)])
+        return grid(get=lambda x, y: self[rotated((x,y),n)])
     #reflects over the line y=x
     def reflected(self):
         return grid(get=lambda x, y: self[y][x])
@@ -68,12 +66,12 @@ class finiteGrid:
     def contains(self,x,y):
         return self.grid.contains(x,y)
     def recentered(self,x,y):
-        return finiteGrid(self.grid.recentered(x,y),self.bL+x,self.bR+x,self.bD+y,self.bU+y)
+        return finiteGrid(self.grid.recentered(x,y),self.bL-x,self.bR-x,self.bD-y,self.bU-y)
     def translated(self,x,y):
         return self.recentered(-x,-y)
     def rotated(self,n):
         l=[self.bR,-self.bD,-self.bL,self.bU]
-        return finiteGrid(self.grid.rotated(n), -l[(n+2)%4],l[(n+0)%4],-l[(n+1)%4],l[(n+3)%4])
+        return finiteGrid(self.grid.rotated(-n), -l[(n+2)%4],l[(n+0)%4],-l[(n+1)%4],l[(n+3)%4])
     def reflected(self):
         return finiteGrid(self.grid.reflected(),self.bD,self.bU,self.bL,self.bR)
     #After slicing, the origin will be at the bottom-left of the slice (conforms with array semantics)
@@ -96,8 +94,8 @@ class finiteGrid:
             return finiteGrid(grid(get,s),0,(stop-start-1)//step,self.bD,self.bU).reflected()
         if type(item)==tuple:
             return self.grid.get(item[0],item[1])
-        return gridrow(get=lambda y: self.grid.get(item,y),s=lambda y, v: self.set(x,y,v))
-    def set(x,y,v):
+        return gridrow(get=lambda y: self.grid.get(item,y),s=lambda y, v: self.set(item,y,v))
+    def set(self,x,y,v):
         self.grid.set(x,y,v)
         self.bL=min(self.bL,x)
         self.bR=max(self.bR,x)
@@ -111,9 +109,14 @@ class finiteGrid:
         for y in range(self.bU,self.bD-1,-1):
             for x in range(self.bL,self.bR+1):
                 res+=str(self[x][y])+'\t'
-            res+='\n\n'
+            res+='\n\n\n'
         return res
-class gridIterator:
-    def __init__(self, g):
-        self.grid=grid
-        self.i=grid
+#functions for transforming points
+#rotates a point counterclockwise by an angle of npi/2
+def rotated(p,n):
+    rotX=vector([[1,0],[0,-1],[-1,0],[0,1]][n%4])
+    rotY=vector([[0,1],[1,0],[0,-1],[-1,0]][n%4])
+    return (vector(p).dot(rotX),vector(p).dot(rotY))
+#translates p by the vector v
+def translated(p,v):
+    return (p[0]+v[0],p[1]+v[1])

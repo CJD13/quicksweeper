@@ -31,5 +31,7 @@ class vector:
         return self+other*-1
     def __truediv__(self,other):
         return self*(1/other)
+    def __getitem__(self, item):
+        return self.coords[item]
 def zero(n):
     return vector([0]*n)
