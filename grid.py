@@ -1,4 +1,4 @@
-import vector
+from vector import vector
 import itertools
 #File supporting grids of squares.
 class grid:
@@ -27,9 +27,9 @@ class grid:
         return self.recentered(-dx,-dy)
     #returns this grid rotated counterclockwise by an angle of n pi/2
     def rotated(self,n):
-        rotX=vector([[1,0],[0,-1],[-1,0],[0,1]][n%4])
-        rotY=vector([[0,1],[1,0],[0,-1],[-1,0]][n%4])
-        return grid(get=lambda x, y: self[vector(x,y).dot(rotX)][vector(x,y).dot(rotY)])
+        rotX=vector([[1,0],[0,1],[-1,0],[0,-1]][n%4])
+        rotY=vector([[0,1],[-1,0],[0,-1],[1,0]][n%4])
+        return grid(get=lambda x, y: self[vector([x,y]).dot(rotX)][vector([x,y]).dot(rotY)])
     #reflects over the line y=x
     def reflected(self):
         return grid(get=lambda x, y: self[y][x])
@@ -68,12 +68,12 @@ class finiteGrid:
     def contains(self,x,y):
         return self.grid.contains(x,y)
     def recentered(self,x,y):
-        return finiteGrid(self.grid.recentered(x,y),self.bL-x,self.bR-x,self.bD-y,self.bU-y)
+        return finiteGrid(self.grid.recentered(x,y),self.bL+x,self.bR+x,self.bD+y,self.bU+y)
     def translated(self,x,y):
-        return self.recentered(-dx,-dy)
+        return self.recentered(-x,-y)
     def rotated(self,n):
-        l=[self.bR,-self.bD,-self.bL,self.bR]
-        return finiteGrid(self.grid.rotated(n), -l[(n+2)%4],l[(n+3)%4],-l[(n+1)%4],l[(n+0)%4])
+        l=[self.bR,-self.bD,-self.bL,self.bU]
+        return finiteGrid(self.grid.rotated(n), -l[(n+2)%4],l[(n+0)%4],-l[(n+1)%4],l[(n+3)%4])
     def reflected(self):
         return finiteGrid(self.grid.reflected(),self.bD,self.bU,self.bL,self.bR)
     #After slicing, the origin will be at the bottom-left of the slice (conforms with array semantics)
@@ -83,14 +83,20 @@ class finiteGrid:
             stop = self.bR+1 if item.stop==None else item.stop
             step = 1 if item.step==None else item.step
             def get(x,y):
-                x=x*step+offset
+                x=x*step+start
                 if x<start or x>=stop:
                     return None
                 return self[x,y]
-            return finiteGrid(grid,start,stop,self.bD,self.bU).reflected()
+            def s(x,y,v):
+                x=x*step+start
+                if x<start or x>=stop:
+                    #TODO: what happens here?
+                    return None
+                self[x,y]=v
+            return finiteGrid(grid(get,s),0,(stop-start-1)//step,self.bD,self.bU).reflected()
         if type(item)==tuple:
-            return self.get(item[0],item[1])
-        return gridrow(get=lambda y: self.get(item,y),s=lambda y, v: self.set(x,y,v))
+            return self.grid.get(item[0],item[1])
+        return gridrow(get=lambda y: self.grid.get(item,y),s=lambda y, v: self.set(x,y,v))
     def set(x,y,v):
         self.grid.set(x,y,v)
         self.bL=min(self.bL,x)
@@ -102,10 +108,10 @@ class finiteGrid:
         #(self.bL..self.bR).product(self.bD..self.bU).map(|(x,y)| self.grid[x][y]).flatten()
     def __str__(self):
         res=''
-        for y in range(self.bU,self.bL-1,-1):
+        for y in range(self.bU,self.bD-1,-1):
             for x in range(self.bL,self.bR+1):
                 res+=str(self[x][y])+'\t'
-            res+='\n'
+            res+='\n\n'
         return res
 class gridIterator:
     def __init__(self, g):
