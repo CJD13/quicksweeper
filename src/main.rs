@@ -1,5 +1,6 @@
 use std::{collections::HashMap, net::TcpStream, fmt::Error};
-mod MinesweepGrid;
+mod minesweep_grid;
+mod area_attack;
 use glam::IVec2;
 use tungstenite::WebSocket;
 trait Ruleset {

@@ -11,7 +11,7 @@ enum Tile {
     Owned(PlayerId)
 }
 
-struct MinesweepGrid {
+pub struct MinesweepGrid {
     sidelength: usize,
     grid: Vec<Vec<Tile>>
 }
@@ -61,16 +61,3 @@ impl MinesweepGrid {
     }
 }
 
-enum AreaAttackEvent {
-    Join {},
-    Revealed {},
-    TileClaimed {},
-    Frozen {},
-    Message {},
-    StateChange {},
-}
-
-struct AreaAttack {
-    players: Vec<PlayerId>,
-    board: MinesweepGrid
-}
