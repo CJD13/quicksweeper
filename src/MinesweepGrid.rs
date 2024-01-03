@@ -32,28 +32,32 @@ impl MinesweepGrid {
         }
         MinesweepGrid { sidelength: sl, grid}
     }
-    fn circle(rad: isize, pMine: u8) -> MinesweepGrid{
+    fn circle(diameter: usize, pMine: u8) -> MinesweepGrid{
         let mut grid = vec![];
-        for i in -rad..=rad {
+        for i in 0..diameter {
             grid.push(vec![]);
-            for j in -rad..=rad {
-                if i*i+j*j>=rad*2 {
-                    grid.last_mut().unwrap().push(Tile::Destroyed)
+            for j in 0..diameter {
+                if (2*i+1-diameter)*(2*i+1-diameter)+(2*j+1-diameter)*(2*j+1-diameter)>=diameter*diameter {
+                    grid[i].push(Tile::Destroyed)
                 } else if random::<u8>()<pMine {
-                    grid.last_mut().unwrap().push(Tile::Mine);
+                    grid[i].push(Tile::Mine);
                 } else {
-                    grid.last_mut().unwrap().push(Tile::Empty);
+                    grid[i].push(Tile::Empty);
                 }
             }
         }
-        MinesweepGrid { sidelength: rad as usize, grid}
+        MinesweepGrid { sidelength: diameter, grid}
     }
-    fn squares_within(&self, i: isize, j:isize, rad: isize) -> impl Iterator<Item=Tile>+'_ {
-        (i-rad..=i+rad).cartesian_product((j-rad..=j+rad)).filter(|(x, y)| 0<=*x&&*x<=self.sidelength as isize&&0<=*y&&*y<=self.sidelength as isize).map(|(x,y)| self.grid[x as usize][y as usize])
+    fn squares_within(&self, i: usize, j:usize, rad: usize) -> impl Iterator<Item=(usize,usize)>+'_ {
+        let start_x = if rad<i {i-rad} else {0};
+        let start_y = if rad<j {i-rad} else {0};
+        let end_x = if i+rad<self.sidelength {i+rad} else {self.sidelength};
+        let end_y = if j+rad<self.sidelength {j+rad} else {self.sidelength};
+        (start_x..end_x).cartesian_product(start_y..end_y)
     }
     //Will count the square itself if it is a mine.
     fn neighboring_mines(&self, i: usize, j: usize) -> u8 {
-        self.squares_within(i as isize, j as isize, 1).map(|t| if t==Tile::Mine {1} else {0}).sum()
+        self.squares_within(i, j, 1).map(|(x,y)| if self.grid[x][y]==Tile::Mine {1} else {0}).sum()
     }
 }
 
