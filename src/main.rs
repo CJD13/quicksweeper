@@ -1,35 +1,31 @@
-use std::{collections::HashMap, net::TcpStream};
+use std::{collections::HashMap, net::TcpStream, fmt::Error};
 
 use glam::IVec2;
 use tungstenite::WebSocket;
-
+trait Ruleset {
+    //Returns whether the add succeeded.
+    fn try_add(&mut self, id: PlayerId) -> bool;
+    fn update_state(&mut self);
+    //Returned is a list of messages to be sent to the corresponding players.
+    fn process_data(&mut self, id: PlayerId, data: Vec<u8>) -> Vec<(PlayerId, Vec<u8>)>;
+}
+struct Game {
+    players: Vec<Player>,
+    ruleset: Box<dyn Ruleset>
+}
 struct Server {
-    games: Vec<AreaAttack>,
+    games: HashMap<GameId,Game>,
 }
 
-enum TileKind {
-    Empty { neighbors: u8 },
-    Mine,
+struct GameId {
+    id: u32
+}
+struct Player {
+    name: String,
+    id: PlayerId,
+    connection: WebSocket<TcpStream>
 }
 
-struct Tile {
-    kind: TileKind,
-    owner: Option<PlayerId>,
-}
-
-enum AreaAttackEvent {
-    Join {},
-    Revealed {},
-    TileClaimed {},
-    Frozen {},
-    Message {},
-    StateChange {},
-}
-
-struct AreaAttack {
-    players: HashMap<PlayerId, WebSocket<TcpStream>>,
-    board: HashMap<IVec2, Tile>,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PlayerId {
