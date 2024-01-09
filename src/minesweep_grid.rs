@@ -24,8 +24,11 @@ impl MinesweepGrid {
     pub fn sidelength(&self) -> usize{
         self.sidelength
     }
-    pub fn content(&self, t: Tile) -> TileContent {
+    pub fn get(&self, t: Tile) -> TileContent {
         self.grid[t.x][t.y]
+    }
+    pub fn set(&mut self, t:Tile, v:TileContent) {
+        self.grid[t.x][t.y]=v
     }
     //Mine probability is given as a "percent" of 256.
     pub fn square(sl: usize, pMine: u8) -> MinesweepGrid {
@@ -58,7 +61,7 @@ impl MinesweepGrid {
         }
         MinesweepGrid { sidelength: diameter, grid}
     }
-    pub fn squares_within(&self, t: Tile, rad: usize) -> impl Iterator<Item=Tile>+'_ {
+    pub fn squares_within(&self, t: Tile, rad: usize) -> impl Iterator<Item=Tile> {
         let (i,j) = (t.x,t.y);
         let start_x = if rad<i {i-rad} else {0};
         let start_y = if rad<j {i-rad} else {0};
@@ -68,7 +71,7 @@ impl MinesweepGrid {
     }
     //Will count the square itself if it is a mine.
     pub fn neighboring_mines(&self, t:Tile) -> u8 {
-        self.squares_within(t, 1).map(|t| if self.content(t)==TileContent::Mine {1} else {0}).sum()
+        self.squares_within(t, 1).map(|t| if self.get(t)==TileContent::Mine {1} else {0}).sum()
     }
     pub fn tile_at(&self, x:usize, y:usize) -> Option<Tile> {
         if x<self.sidelength && y<self.sidelength {
@@ -77,7 +80,7 @@ impl MinesweepGrid {
             None
         }
     }
-    pub fn all_tiles(&self) -> impl Iterator<Item=Tile>+'_{
+    pub fn all_tiles(&self) -> impl Iterator<Item=Tile>{
         self.squares_within(Tile {x:0, y:0},self.sidelength())
     }
 }
