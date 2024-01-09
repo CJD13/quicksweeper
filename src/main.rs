@@ -4,8 +4,8 @@ mod area_attack;
 use glam::IVec2;
 use tungstenite::WebSocket;
 trait Ruleset {
-    //Returns whether the add succeeded.
-    fn try_add(&mut self, id: PlayerId) -> bool;
+    //Adds a player.
+    fn add(&mut self, id: PlayerId) -> Vec<(PlayerId, Vec<u8>)>;
     fn update_state(&mut self)-> Vec<(PlayerId, Vec<u8>)>;
     //Returned is a list of messages to be sent to the corresponding players.
     fn process_data(&mut self, id: PlayerId, data: Vec<u8>) -> Vec<(PlayerId, Vec<u8>)>;
