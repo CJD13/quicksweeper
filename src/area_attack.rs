@@ -2,14 +2,20 @@ use std::collections::HashMap;
 use std::io::Empty;
 use std::time::Instant;
 
+use rand::random;
+
 use crate::{PlayerId, Ruleset};
 use crate::minesweep_grid::{MinesweepGrid, Tile, TileContent};
+const FREEZE_TIME: u64 = 15;
 enum AreaAttackEvent {
     Join(PlayerId),
     Destroyed(Tile),
+    Reset(Tile),
     Revealed(Tile,u8),
     TileClaimed(Tile, PlayerId),
     Frozen(PlayerId),
+    Unfrozen(PlayerId),
+    Eliminated(PlayerId),
     Message(String),
     StateChange(AreaAttackState),
     GameEnd
@@ -54,15 +60,16 @@ struct AreaAttack {
     players: HashMap<PlayerId, PlayerState>,
     board: MinesweepGrid,
     state: AreaAttackState,
-    start_time: Instant
+    start_time: Instant,
+    p_mine: u8
 }
 impl AreaAttack {
     fn descriptor(&self) -> Vec<u8> {
         //Board size, maybe statement that this is area attack, maybe statement of board shape or mine probability?
         unimplemented!()
     }
-    fn all_players(&self, messages:&mut Vec<(PlayerId,Vec<u8>)>, m: Vec<u8>) {
-        let _= self.players.iter().map(|(p, _)| messages.push((*p, m.clone())));
+    fn all_players(&self, messages: &mut Vec<(PlayerId,Vec<u8>)>, m: Vec<u8>) {
+        let _= self.players.keys().map(|p| messages.push((*p, m.clone())));
     }
 }
 impl Ruleset for AreaAttack {
@@ -118,6 +125,12 @@ impl Ruleset for AreaAttack {
         if self.players[&id].is_spectating() {
             return vec![(id, AreaAttackEvent::Message("You are spectating and cannot make guesses".to_string()).serialize())]
         }
+        if let PlayerState::Frozen(_) = self.players[&id]{
+            return vec![(id, AreaAttackEvent::Message("You are frozen and cannot make guesses".to_string()).serialize())]
+        }
+        if let PlayerState::Eliminated = self.players[&id]{
+            return vec![(id, AreaAttackEvent::Message("You are eliminated and cannot make guesses".to_string()).serialize())]
+        }
         match AreaAttackRequest::deserialize(data).and_then(
             |AreaAttackRequest::Guess(x, y)| self.board.tile_at(x, y)
         ) {
@@ -129,12 +142,13 @@ impl Ruleset for AreaAttack {
                         (_,AreaAttackState::Waiting) => {
                             match self.players[&id]  {
                                 PlayerState::Waiting => {
-                                    for t in self.board.squares_within(t, 1) {
+                                    for t in self.board.ball(t, 1) {
                                         if self.board.get(t) == TileContent::Mine {
                                             self.board.set(t,TileContent::Empty);
                                         }
                                     }
                                     self.board.set(t,TileContent::Owned(id));
+                                    self.players.insert(id, PlayerState::Playing);
                                     self.players.iter().map(
                                         |(&p,_)| if p!=id {
                                             (p, AreaAttackEvent::TileClaimed(t, id).serialize())
@@ -148,6 +162,17 @@ impl Ruleset for AreaAttack {
                             }
                         }
                         (TileContent::Empty,_) => {
+                            if matches!(self.state,AreaAttackState::Attack) {
+                                let mut legal = false;
+                                for s in self.board.ball(t, 1) {
+                                    if self.board.get(s)==TileContent::Owned(id) {
+                                        legal = true;
+                                    }
+                                }
+                                if !legal {
+                                    return vec![(id, AreaAttackEvent::Message("Your guess must be adjacent to a tile that you own.".to_string()).serialize())]
+                                }
+                            }
                             self.board.set(t, TileContent::Owned(id));
                             let m = self.board.neighboring_mines(t);
                             self.players.iter().map(
@@ -158,9 +183,48 @@ impl Ruleset for AreaAttack {
                                 }
                             ).collect()
                         },
-                        (TileContent::Mine, AreaAttackState::Freeze) => todo!(),
-                        (TileContent::Mine, AreaAttackState::Attack) => todo!(),
-                        (TileContent::Mine, AreaAttackState::SuddenDeath) => todo!(),
+                        (TileContent::Mine, AreaAttackState::Freeze) => {
+                            self.players.insert(id, PlayerState::Frozen(Instant::now()));
+                            let mut messages=vec![];
+                            self.all_players(&mut messages, AreaAttackEvent::Frozen(id).serialize());
+                            messages
+                        },
+                        (TileContent::Mine, AreaAttackState::Attack) => {
+                            let mut legal = false;
+                            for s in self.board.ball(t, 1) {
+                                if self.board.get(s)==TileContent::Owned(id) {
+                                    legal = true;
+                                }
+                            }
+                            if legal {
+                                let mut messages = vec![];
+                                self.all_players(&mut messages, AreaAttackEvent::Destroyed(t).serialize());
+                                for s in self.board.ball(t, 3) {
+                                    if !matches!(self.board.get(s),TileContent::Destroyed) {
+                                        self.all_players(&mut messages, AreaAttackEvent::Reset(s).serialize());
+                                        if random::<u8>()<self.p_mine {
+                                            self.board.set(s, TileContent::Mine);
+                                        } else {
+                                            self.board.set(s,TileContent::Empty);
+                                        }
+                                    }
+                                }
+                                for s in self.board.sphere(t,4) {
+                                    if let TileContent::Owned(p)=self.board.get(s) {
+                                        messages.push((p,AreaAttackEvent::Revealed(s, self.board.neighboring_mines(s)).serialize()));
+                                    }
+                                }
+                                messages
+                            } else {
+                                vec![(id, AreaAttackEvent::Message("Your guess must be adjacent to a tile that you own.".to_string()).serialize())]
+                            }
+                        },
+                        (TileContent::Mine, AreaAttackState::SuddenDeath) => {
+                            self.players.insert(id, PlayerState::Eliminated);
+                            let mut messages = vec![];
+                            self.all_players(&mut messages, AreaAttackEvent::Eliminated(id).serialize());
+                            messages
+                        },
                     }
                     
                 },

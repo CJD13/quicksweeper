@@ -15,6 +15,21 @@ pub struct Tile {
     x: usize,
     y: usize
 }
+impl Tile {
+    fn dist(self, other: Tile) -> usize{
+        let x_dist = if self.x>other.x {
+            self.x-other.x
+        } else {
+            other.x-self.x
+        };
+        let y_dist = if self.y>other.y {
+            self.y-other.y
+        } else {
+            other.y-self.y
+        };
+        usize::max(x_dist, y_dist)
+    }
+}
 pub struct MinesweepGrid {
     sidelength: usize,
     grid: Vec<Vec<TileContent>>
@@ -61,7 +76,7 @@ impl MinesweepGrid {
         }
         MinesweepGrid { sidelength: diameter, grid}
     }
-    pub fn squares_within(&self, t: Tile, rad: usize) -> impl Iterator<Item=Tile> {
+    pub fn ball(&self, t: Tile, rad: usize) -> impl Iterator<Item=Tile> {
         let (i,j) = (t.x,t.y);
         let start_x = if rad<i {i-rad} else {0};
         let start_y = if rad<j {i-rad} else {0};
@@ -69,9 +84,14 @@ impl MinesweepGrid {
         let end_y = if j+rad<self.sidelength {j+rad} else {self.sidelength};
         (start_x..end_x).cartesian_product(start_y..end_y).map(|(x,y)| Tile {x,y})
     }
+    //Optimize?
+    pub fn sphere(&self, t: Tile, rad: usize) -> impl Iterator<Item=Tile> {
+        self.ball(t,rad).filter(move |s| t.dist(*s)==rad)
+        
+    }
     //Will count the square itself if it is a mine.
     pub fn neighboring_mines(&self, t:Tile) -> u8 {
-        self.squares_within(t, 1).map(|t| if self.get(t)==TileContent::Mine {1} else {0}).sum()
+        self.ball(t, 1).map(|t| if self.get(t)==TileContent::Mine {1} else {0}).sum()
     }
     pub fn tile_at(&self, x:usize, y:usize) -> Option<Tile> {
         if x<self.sidelength && y<self.sidelength {
@@ -81,6 +101,6 @@ impl MinesweepGrid {
         }
     }
     pub fn all_tiles(&self) -> impl Iterator<Item=Tile>{
-        self.squares_within(Tile {x:0, y:0},self.sidelength())
+        self.ball(Tile {x:0, y:0},self.sidelength())
     }
 }
