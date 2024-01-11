@@ -7,6 +7,7 @@ use rand::random;
 use crate::{PlayerId, Ruleset};
 use crate::minesweep_grid::{MinesweepGrid, Tile, TileContent};
 const FREEZE_TIME: u64 = 15;
+#[derive(Clone)]
 enum AreaAttackEvent {
     Join(PlayerId),
     Destroyed(Tile),
@@ -60,7 +61,7 @@ struct AreaAttack {
     players: HashMap<PlayerId, PlayerState>,
     board: MinesweepGrid,
     state: AreaAttackState,
-    start_time: Instant,
+    start_time: Option<Instant>,
     p_mine: u8
 }
 impl AreaAttack {
@@ -68,8 +69,8 @@ impl AreaAttack {
         //Board size, maybe statement that this is area attack, maybe statement of board shape or mine probability?
         unimplemented!()
     }
-    fn all_players(&self, messages: &mut Vec<(PlayerId,Vec<u8>)>, m: Vec<u8>) {
-        let _= self.players.keys().map(|p| messages.push((*p, m.clone())));
+    fn all_players(&self, messages: &mut Vec<(PlayerId,Vec<u8>)>, e: AreaAttackEvent) {
+        let _= self.players.keys().map(|p| messages.push((*p, e.clone().serialize())));
     }
 }
 impl Ruleset for AreaAttack {
@@ -90,30 +91,51 @@ impl Ruleset for AreaAttack {
                 messages.push((id, AreaAttackEvent::Join(*p).serialize()));
             }
         }
+        //send all owned cells
+        let _ = self.board.all_tiles().map(|t| 
+            if let TileContent::Owned(p) = self.board.get(t) {
+                    messages.push((id, AreaAttackEvent::TileClaimed(t,p).serialize()))
+            }
+        );
         match self.state {
             AreaAttackState::Waiting => {
                 //Alert other players
-                self.all_players(&mut messages, AreaAttackEvent::Join(id).serialize());
+                self.all_players(&mut messages, AreaAttackEvent::Join(id));
                 //Add to player list
                 self.players.insert(id,PlayerState::Playing);
             }
             _ => {
                 //Add to spectator list
                 self.players.insert(id,PlayerState::Spectating);
-                //send all owned cells
-                let _ = self.board.all_tiles().map(|t| 
-                    if let TileContent::Owned(p) = self.board.get(t) {
-                            messages.push((id, AreaAttackEvent::TileClaimed(t,p).serialize()))
-                    }
-            );
             }
         }
         messages
     }
     fn update_state(&mut self)-> Vec<(PlayerId, Vec<u8>)> {
         //Check time and update the state.
+        
         match self.state {
-            AreaAttackState::Waiting => vec![],
+            AreaAttackState::Waiting => {
+                let mut all_ready = true;
+                for s in self.players.values() {
+                    if matches!(s,PlayerState::Waiting) {
+                        all_ready=false;
+                    }
+                }
+                let mut messages = vec![];
+                if all_ready {
+                    for t in self.board.all_tiles() {
+                        if let TileContent::Owned(p) = self.board.get(t) {
+                            //Starting tile, reveal to player
+                            messages.push((p, AreaAttackEvent::Revealed(t, 0).serialize()));
+                        }
+                    }
+                }
+                self.state=AreaAttackState::Freeze;
+                self.start_time=Some(Instant::now());
+                //Maybe also send a StateChange?
+                messages
+            },
             AreaAttackState::Freeze => {
                 todo!()
             }
@@ -149,13 +171,11 @@ impl Ruleset for AreaAttack {
                                     }
                                     self.board.set(t,TileContent::Owned(id));
                                     self.players.insert(id, PlayerState::Playing);
-                                    self.players.iter().map(
-                                        |(&p,_)| if p!=id {
-                                            (p, AreaAttackEvent::TileClaimed(t, id).serialize())
-                                        } else {
-                                            (id, AreaAttackEvent::Revealed(t, 0).serialize())
-                                        }
-                                    ).collect()
+                                    let mut messages = vec![];
+                                    //The square is not revealed to the player that selected it, and it is instead revealed at game start
+                                    //Maybe that should be changed?
+                                    self.all_players(&mut messages,AreaAttackEvent::TileClaimed(t, id));
+                                    messages
                                 },
 
                                 _ => vec![(id, AreaAttackEvent::Message("You have already selected an initial tile.".to_string()).serialize())],
@@ -186,7 +206,7 @@ impl Ruleset for AreaAttack {
                         (TileContent::Mine, AreaAttackState::Freeze) => {
                             self.players.insert(id, PlayerState::Frozen(Instant::now()));
                             let mut messages=vec![];
-                            self.all_players(&mut messages, AreaAttackEvent::Frozen(id).serialize());
+                            self.all_players(&mut messages, AreaAttackEvent::Frozen(id));
                             messages
                         },
                         (TileContent::Mine, AreaAttackState::Attack) => {
@@ -198,10 +218,10 @@ impl Ruleset for AreaAttack {
                             }
                             if legal {
                                 let mut messages = vec![];
-                                self.all_players(&mut messages, AreaAttackEvent::Destroyed(t).serialize());
+                                self.all_players(&mut messages, AreaAttackEvent::Destroyed(t));
                                 for s in self.board.ball(t, 3) {
                                     if !matches!(self.board.get(s),TileContent::Destroyed) {
-                                        self.all_players(&mut messages, AreaAttackEvent::Reset(s).serialize());
+                                        self.all_players(&mut messages, AreaAttackEvent::Reset(s));
                                         if random::<u8>()<self.p_mine {
                                             self.board.set(s, TileContent::Mine);
                                         } else {
@@ -222,7 +242,7 @@ impl Ruleset for AreaAttack {
                         (TileContent::Mine, AreaAttackState::SuddenDeath) => {
                             self.players.insert(id, PlayerState::Eliminated);
                             let mut messages = vec![];
-                            self.all_players(&mut messages, AreaAttackEvent::Eliminated(id).serialize());
+                            self.all_players(&mut messages, AreaAttackEvent::Eliminated(id));
                             messages
                         },
                     }
