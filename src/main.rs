@@ -1,5 +1,7 @@
 use std::{collections::HashMap, io, net::TcpStream};
 use std::net::TcpListener;
+use tracing::{debug, debug_span, error, info, trace, warn};
+use tracing_subscriber::util::SubscriberInitExt;
 
 mod minesweep_grid;
 mod area_attack;
@@ -47,32 +49,50 @@ struct PlayerId {
     id: u32,
 }
 
+fn trace_level_testing() {
+    trace!("This is a trace. Trace logging is enabled");
+    debug!("This is a debug. Debug logging is enabled");
+    info!("This is an info. Info logging is enabled");
+    warn!("This is a warning. Warnings are enabled.");
+    error!("This is an error. Errors are enabled.");
+}
+
 fn main() {
+    tracing_subscriber::FmtSubscriber::new().init();
+    info!("Launching! Hello World!!!");
+    trace_level_testing();
     let mut server = Server::default();
 
     let address = "localhost:31111";
-    let mut socket = TcpListener::bind(address).unwrap();
-    socket.set_nonblocking(true).expect("Could not accept nonblocking tcp connections");
+    let mut listener = TcpListener::bind(address).expect("Could not initialize a TCP listener");
+    listener.set_nonblocking(true).expect("Could not accept nonblocking tcp connections");
 
     loop {
-        for stream in socket.incoming() {
-            match stream {
-                Ok(stream) => {
-                    server.uninitialized.push(stream);
-                }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // continue
-                }
-                Err(_) => {
-                    //TODO log the error
+        {
+            debug_span!("connection_accept");
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        info!("Accepting new connection on {:?}", stream.local_addr());
+                        server.uninitialized.push(stream);
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        // continue
+                    }
+                    Err(e) => {
+                        error!("Failed to accept connection. Reason: {e}");
+                    }
                 }
             }
         }
 
-        for (id, game) in &mut server.games {
-            game.ruleset.update_state();
-            for player in &mut game.players {
-                //TODO process data
+        {
+            debug_span!("game_update");
+            for (id, game) in &mut server.games {
+                game.ruleset.update_state();
+                for player in &mut game.players {
+                    //TODO process data
+                }
             }
         }
     }
