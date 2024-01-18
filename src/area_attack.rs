@@ -70,7 +70,7 @@ impl AreaAttack {
         unimplemented!()
     }
     fn all_players(&self, messages: &mut Vec<(PlayerId,Vec<u8>)>, e: AreaAttackEvent) {
-        let _= self.players.keys().map(|p| messages.push((*p, e.clone().serialize())));
+        self.players.keys().for_each(|p| messages.push((*p, e.clone().serialize())));
     }
 }
 impl Ruleset for AreaAttack {
@@ -79,8 +79,8 @@ impl Ruleset for AreaAttack {
         //What type of game are we playing?
         messages.push((id, self.descriptor()));
         //cells are destroyed to communicate proper board shape
-        let _= self.board.all_tiles()
-            .map(|t| 
+        self.board.all_tiles()
+            .for_each(|t| 
                 if self.board.get(t)==TileContent::Destroyed {
                     messages.push((id, AreaAttackEvent::Destroyed(t).serialize()))
                 }
@@ -92,7 +92,7 @@ impl Ruleset for AreaAttack {
             }
         }
         //send all owned cells
-        let _ = self.board.all_tiles().map(|t| 
+        self.board.all_tiles().for_each(|t| 
             if let TileContent::Owned(p) = self.board.get(t) {
                     messages.push((id, AreaAttackEvent::TileClaimed(t,p).serialize()))
             }
