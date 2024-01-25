@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Empty;
+use std::mem;
 use std::time::Instant;
 
 use rand::random;
@@ -20,11 +21,6 @@ enum AreaAttackEvent {
     Message(String),
     StateChange(AreaAttackState),
     GameEnd
-}
-impl AreaAttackEvent {
-    fn serialize(self) -> Vec<u8> {
-        unimplemented!()
-    }
 }
 enum AreaAttackRequest {
     Guess(usize, usize)
@@ -55,22 +51,32 @@ enum AreaAttackState {
     Waiting,
     Freeze,
     Attack,
-    SuddenDeath
+    SuddenDeath,
+    Ended
 }
 struct AreaAttack {
     players: HashMap<PlayerId, PlayerState>,
     board: MinesweepGrid,
     state: AreaAttackState,
-    start_time: Option<Instant>,
+    last_time: Option<Instant>,
     p_mine: u8
 }
+//How long a player is frozen for
+const frozen_for: u8 = 15;
+//How long game modes last
+const freeze_duration: u8 = 240;
+const attack_duration: u8 = 120;
+const suddenDeath_duration: u8 = 240;
 impl AreaAttack {
     fn descriptor(&self) -> Vec<u8> {
         //Board size, maybe statement that this is area attack, maybe statement of board shape or mine probability?
         unimplemented!()
     }
     fn all_players(&self, messages: &mut Vec<(PlayerId,Vec<u8>)>, e: AreaAttackEvent) {
-        self.players.keys().for_each(|p| messages.push((*p, e.clone().serialize())));
+        self.players.keys().for_each(|p| messages.push((*p, self.serialize(e.clone()))));
+    }
+    fn serialize(&self, e: AreaAttackEvent) -> Vec<u8>{
+        unimplemented!()
     }
 }
 impl Ruleset for AreaAttack {
@@ -82,19 +88,19 @@ impl Ruleset for AreaAttack {
         self.board.all_tiles()
             .for_each(|t| 
                 if self.board.get(t)==TileContent::Destroyed {
-                    messages.push((id, AreaAttackEvent::Destroyed(t).serialize()))
+                    messages.push((id, self.serialize(AreaAttackEvent::Destroyed(t))))
                 }
             );
         //Players join game
         for (p,state) in &self.players {
             if !state.is_spectating() {
-                messages.push((id, AreaAttackEvent::Join(*p).serialize()));
+                messages.push((id, self.serialize(AreaAttackEvent::Join(*p))));
             }
         }
         //send all owned cells
         self.board.all_tiles().for_each(|t| 
             if let TileContent::Owned(p) = self.board.get(t) {
-                    messages.push((id, AreaAttackEvent::TileClaimed(t,p).serialize()))
+                    messages.push((id, self.serialize(AreaAttackEvent::TileClaimed(t,p))))
             }
         );
         match self.state {
@@ -111,9 +117,22 @@ impl Ruleset for AreaAttack {
         }
         messages
     }
+    //Check time and update the state.
     fn update_state(&mut self)-> Vec<(PlayerId, Vec<u8>)> {
-        //Check time and update the state.
-        
+        let mut messages = vec![];
+        //Unfreeze players
+        let mut unfrozen_players=vec![];
+        for (p,v) in self.players.iter_mut() {
+            if let PlayerState::Frozen(i) = v {
+                if i.elapsed().as_secs()>=frozen_for as u64 {
+                    *v = PlayerState::Playing;
+                    unfrozen_players.push(*p);
+                }
+            }
+        }
+        for p in unfrozen_players {
+            self.all_players(&mut messages, AreaAttackEvent::Unfrozen(p))
+        }
         match self.state {
             AreaAttackState::Waiting => {
                 let mut all_ready = true;
@@ -122,45 +141,71 @@ impl Ruleset for AreaAttack {
                         all_ready=false;
                     }
                 }
-                let mut messages = vec![];
                 if all_ready {
                     for t in self.board.all_tiles() {
                         if let TileContent::Owned(p) = self.board.get(t) {
                             //Starting tile, reveal to player
-                            messages.push((p, AreaAttackEvent::Revealed(t, 0).serialize()));
+                            messages.push((p, self.serialize(AreaAttackEvent::Revealed(t, 0))));
                         }
                     }
                 }
                 self.state=AreaAttackState::Freeze;
-                self.start_time=Some(Instant::now());
+                self.last_time=Some(Instant::now());
                 //Maybe also send a StateChange?
-                messages
             },
             AreaAttackState::Freeze => {
-                todo!()
+                if self.last_time.unwrap().elapsed().as_secs()>=freeze_duration as u64{
+                    self.state = AreaAttackState::Attack;
+                    self.last_time=Some(Instant::now());
+                    self.all_players(&mut messages,AreaAttackEvent::StateChange(self.state));
+                }
             }
-            AreaAttackState::Attack => todo!(),
-            AreaAttackState::SuddenDeath => todo!(),
+            AreaAttackState::Attack => {
+                if self.last_time.unwrap().elapsed().as_secs()>=attack_duration as u64{
+                    self.state = AreaAttackState::SuddenDeath;
+                    self.last_time=Some(Instant::now());
+                    self.all_players(&mut messages,AreaAttackEvent::StateChange(self.state));
+                }
+            }
+            AreaAttackState::SuddenDeath => {
+                //Check if all players have been eliminated
+                //Maybe we should just keep track of how many players have been eliminated,
+                //so that we don't have to do this every time in the loop
+                let mut all_gone=true;
+                for v in self.players.values() {
+                    if matches!(*v, PlayerState::Playing) {
+                        all_gone = false;
+                        break;
+                    }
+                }
+                if all_gone || self.last_time.unwrap().elapsed().as_secs()>=attack_duration as u64{
+                    self.state = AreaAttackState::Ended;
+                    self.all_players(&mut messages,AreaAttackEvent::StateChange(self.state));
+                }
+            },
+            AreaAttackState::Ended => {}
         }
+        messages
     }
     fn process_data(&mut self, id: PlayerId, data: Vec<u8>) -> Vec<(PlayerId, Vec<u8>)> {
         if self.players[&id].is_spectating() {
-            return vec![(id, AreaAttackEvent::Message("You are spectating and cannot make guesses".to_string()).serialize())]
+            return vec![(id, self.serialize(AreaAttackEvent::Message("You are spectating and cannot make guesses".to_string())))]
         }
         if let PlayerState::Frozen(_) = self.players[&id]{
-            return vec![(id, AreaAttackEvent::Message("You are frozen and cannot make guesses".to_string()).serialize())]
+            return vec![(id, self.serialize(AreaAttackEvent::Message("You are frozen and cannot make guesses".to_string())))]
         }
         if let PlayerState::Eliminated = self.players[&id]{
-            return vec![(id, AreaAttackEvent::Message("You are eliminated and cannot make guesses".to_string()).serialize())]
+            return vec![(id, self.serialize(AreaAttackEvent::Message("You are eliminated and cannot make guesses".to_string())))]
         }
         match AreaAttackRequest::deserialize(data).and_then(
             |AreaAttackRequest::Guess(x, y)| self.board.tile_at(x, y)
         ) {
-                None =>  vec![(id, AreaAttackEvent::Message("Invalid guess".to_string()).serialize())],
+                None =>  vec![(id, self.serialize(AreaAttackEvent::Message("Invalid guess".to_string())))],
                 Some(t) => {
                     match (self.board.get(t),self.state) {
-                        (TileContent::Destroyed,_) => vec![(id, AreaAttackEvent::Message("That tile is destroyed".to_string()).serialize())],
-                        (TileContent::Owned(_),_) => vec![(id, AreaAttackEvent::Message("That tile is already owned".to_string()).serialize())],
+                        (_,AreaAttackState::Ended) => vec![(id,self.serialize(AreaAttackEvent::StateChange(AreaAttackState::Ended)))],
+                        (TileContent::Destroyed,_) => vec![(id, self.serialize(AreaAttackEvent::Message("That tile is destroyed".to_string())))],
+                        (TileContent::Owned(_),_) => vec![(id, self.serialize(AreaAttackEvent::Message("That tile is already owned".to_string())))],
                         (_,AreaAttackState::Waiting) => {
                             match self.players[&id]  {
                                 PlayerState::Waiting => {
@@ -178,7 +223,7 @@ impl Ruleset for AreaAttack {
                                     messages
                                 },
 
-                                _ => vec![(id, AreaAttackEvent::Message("You have already selected an initial tile.".to_string()).serialize())],
+                                _ => vec![(id, self.serialize(AreaAttackEvent::Message("You have already selected an initial tile.".to_string())))],
                             }
                         }
                         (TileContent::Empty,_) => {
@@ -190,16 +235,16 @@ impl Ruleset for AreaAttack {
                                     }
                                 }
                                 if !legal {
-                                    return vec![(id, AreaAttackEvent::Message("Your guess must be adjacent to a tile that you own.".to_string()).serialize())]
+                                    return vec![(id, self.serialize(AreaAttackEvent::Message("Your guess must be adjacent to a tile that you own.".to_string())))]
                                 }
                             }
                             self.board.set(t, TileContent::Owned(id));
                             let m = self.board.neighboring_mines(t);
                             self.players.iter().map(
                                 |(&p,_)| if p!=id {
-                                    (p, AreaAttackEvent::TileClaimed(t, id).serialize())
+                                    (p,self.serialize(AreaAttackEvent::TileClaimed(t, id)))
                                 } else {
-                                    (id, AreaAttackEvent::Revealed(t, m).serialize())
+                                    (id,self.serialize(AreaAttackEvent::Revealed(t, m)))
                                 }
                             ).collect()
                         },
@@ -231,12 +276,12 @@ impl Ruleset for AreaAttack {
                                 }
                                 for s in self.board.sphere(t,4) {
                                     if let TileContent::Owned(p)=self.board.get(s) {
-                                        messages.push((p,AreaAttackEvent::Revealed(s, self.board.neighboring_mines(s)).serialize()));
+                                        messages.push((p,self.serialize(AreaAttackEvent::Revealed(s, self.board.neighboring_mines(s)))));
                                     }
                                 }
                                 messages
                             } else {
-                                vec![(id, AreaAttackEvent::Message("Your guess must be adjacent to a tile that you own.".to_string()).serialize())]
+                                vec![(id,self.serialize(AreaAttackEvent::Message("Your guess must be adjacent to a tile that you own.".to_string())))]
                             }
                         },
                         (TileContent::Mine, AreaAttackState::SuddenDeath) => {
